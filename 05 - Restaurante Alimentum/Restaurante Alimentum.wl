@@ -1,0 +1,186 @@
+(* ::Package:: *)
+
+Needs["Murta`"]
+Needs["MAFormat`"]
+Needs["MarcheDiego`"]
+
+
+$now=DateString[Now,{"Day","/","Month","/","Year"}];
+$now2=DateString[Now,{"Day","-","Month","-","Year"}];
+$lojas={7};
+SetDirectory@mrtFileDirectory[];
+$mailsGerencia=marcheGetMailFromXML[];
+
+
+getALIMENTUM[codLoja_]:=Module[{sql,r,conn=marcheConn[],tab},
+	sql=" 
+		SET NOCOUNT ON;	
+	
+		SELECT 
+				COD_LOJA
+				,AJUSTE.COD_PRODUTO
+				,DESCRICAO
+				,NO_DEPARTAMENTO
+				,UNIDADE_VENDA
+				,SUM(CAST(QTD_AJUSTE AS DOUBLE PRECISION))*-1 AS QTD_AJUSTE
+				,SUM((QTD_AJUSTE*VAL_CUSTO_REP)*-1) AS CUSTO
+				INTO #TAB_AJUSTE_TEMP
+		FROM TAB_AJUSTE_ESTOQUE AS AJUSTE WITH (NOLOCK)LEFT JOIN [192.168.0.13].BI.DBO.BI_CAD_PRODUTO AS CAD ON AJUSTE.COD_PRODUTO = CAD.COD_PRODUTO
+		WHERE 1=1
+				AND COD_AJUSTE IN (221)
+				AND COD_LOJA IN (`1`)
+                AND DTA_AJUSTE > = '20150101'
+
+		GROUP BY 
+				COD_LOJA
+				,AJUSTE.COD_PRODUTO
+				,DESCRICAO
+				,NO_DEPARTAMENTO
+				,UNIDADE_VENDA
+
+		SELECT 
+				COD_PRODUTO
+				,SUM(CAST((QTD_EMBALAGEM*QTD_ENTRADA) AS DOUBLE PRECISION)) AS QTD_EMITIDA
+		INTO #TAB_EMITIDA
+		FROM [ZEUS_RTG].[DBO].[VW_NF_SAIDA]
+		WHERE 1=1
+				AND COD_LOJA IN (`1`)
+				AND COD_CLIENTE = 1960498578
+				AND COD_FISCAL = 43	
+				AND DTA_EMISSAO >='20150101'	
+		GROUP BY 
+				COD_PRODUTO
+
+		SELECT 
+				AJUSTE.COD_PRODUTO*1 as PLU
+				,DESCRICAO
+				,NO_DEPARTAMENTO
+				,ISNULL(UNIDADE_VENDA,'UN') as UNIDADE_VENDA
+				,QTD_AJUSTE
+				,ISNULL(QTD_EMITIDA,0)  AS QTD_EMITIDA
+				,ISNULL(CAST((QTD_AJUSTE-QTD_EMITIDA) AS DOUBLE PRECISION),QTD_AJUSTE) AS [\[CapitalAGrave] EMITIR]
+				,VAL_CUSTO_REP
+		FROM #TAB_AJUSTE_TEMP AS AJUSTE LEFT JOIN #TAB_EMITIDA ON AJUSTE.COD_PRODUTO = #TAB_EMITIDA.COD_PRODUTO LEFT JOIN TAB_PRODUTO_LOJA AS REP ON REP.COD_LOJA = AJUSTE.COD_LOJA AND REP.COD_PRODUTO = AJUSTE.COD_PRODUTO 
+		WHERE 1=1
+				AND ISNULL(CAST((QTD_AJUSTE-QTD_EMITIDA) AS DOUBLE PRECISION),QTD_AJUSTE) > 0.010
+
+		ORDER BY 
+				ISNULL(CAST((QTD_AJUSTE-QTD_EMITIDA) AS DOUBLE PRECISION),QTD_AJUSTE) DESC
+";
+	r\[LeftArrow]mrtSQLDataObject[conn,sql,{SQLArgument@@codLoja}];
+	r
+];
+r\[LeftArrow]getALIMENTUM[$lojas]
+
+
+getTOTAL[codLoja_]:=Module[{sql,s,conn=marcheConn[],tab},
+	sql=" SET NOCOUNT ON;	
+
+		SELECT 
+				COD_LOJA
+				,AJUSTE.COD_PRODUTO
+				,DESCRICAO
+				,NO_DEPARTAMENTO
+				,UNIDADE_VENDA
+				,SUM(CAST(QTD_AJUSTE AS DOUBLE PRECISION))*-1 AS QTD_AJUSTE
+				,SUM((QTD_AJUSTE*VAL_CUSTO_REP)*-1) AS CUSTO
+				INTO #TAB_AJUSTE_TEMP
+		FROM TAB_AJUSTE_ESTOQUE AS AJUSTE WITH (NOLOCK) LEFT JOIN [192.168.0.13].BI.DBO.BI_CAD_PRODUTO AS CAD ON AJUSTE.COD_PRODUTO = CAD.COD_PRODUTO
+		WHERE 1=1
+				AND COD_AJUSTE IN (221)
+				AND DTA_AJUSTE > = '20150101'
+				AND COD_LOJA IN (`1`)
+		GROUP BY 
+				COD_LOJA
+				,AJUSTE.COD_PRODUTO
+				,DESCRICAO
+				,NO_DEPARTAMENTO
+				,UNIDADE_VENDA
+
+
+		SELECT 
+				COD_PRODUTO
+				,SUM(CAST((QTD_EMBALAGEM*QTD_ENTRADA) AS DOUBLE PRECISION)) AS QTD_EMITIDA
+		INTO #TAB_EMITIDA
+		FROM [ZEUS_RTG].[DBO].[VW_NF_SAIDA]
+		WHERE 1=1
+				AND COD_LOJA IN (`1`)
+				AND COD_CLIENTE = 1960498578
+				AND COD_FISCAL = 43	
+				AND DTA_EMISSAO >='20150101'
+		GROUP BY 
+				COD_PRODUTO
+
+		
+	    SELECT 
+				
+				NO_DEPARTAMENTO as Departamento
+				,COUNT(AJUSTE.COD_PRODUTO) as Qtde
+		INTO #TAB_PENDENCIAS_TOTAL_TEMP
+		FROM #TAB_AJUSTE_TEMP AS AJUSTE LEFT JOIN #TAB_EMITIDA ON AJUSTE.COD_PRODUTO = #TAB_EMITIDA.COD_PRODUTO LEFT JOIN TAB_PRODUTO_LOJA AS REP ON REP.COD_LOJA = AJUSTE.COD_LOJA AND REP.COD_PRODUTO = AJUSTE.COD_PRODUTO 
+		WHERE 1=1
+				AND ISNULL(CAST((QTD_AJUSTE-QTD_EMITIDA) AS DOUBLE PRECISION),QTD_AJUSTE) > 0.010
+		GROUP BY 
+				NO_DEPARTAMENTO
+		
+			
+		SELECT * FROM  #TAB_PENDENCIAS_TOTAL_TEMP 
+		UNION		
+		SELECT 'TOTAL' as TOTAL, SUM(QTDE)as QTDE FROM  #TAB_PENDENCIAS_TOTAL_TEMP
+		
+ ";
+		s\[LeftArrow]mrtSQLDataObject[conn,sql,{SQLArgument@@codLoja}];
+		s
+];
+s\[LeftArrow]getTOTAL[$lojas]
+
+
+(*s["DataAll"]//mrtCopyTable2ClipBoard*)
+
+
+gridTOTAL[data_Symbol]:=Module[{grid,title,s,color2,stl},
+	s\[LeftArrow]data;
+	color2=Which[ 
+			#<0.04,Darker@Green
+			,#<0.06,Orange,
+			,True,Red
+	]&;
+
+	stl[val_]:=Style[maF["%"][val],Bold,color2@val];
+	stl[Null]="";
+
+	grid=maReportGrid[s,"ColumnFormat"->{{"Qtde"}-> "N"},"TotalRow"->True];
+	title=Style[Row@{"Pend\[EHat]ncias ", \!\(\*
+StyleBox[
+TemplateBox[{"$now"},
+"RowDefault"],
+StripOnInput->False,
+LineColor->RGBColor[0.33333333333333337`, 0.33333333333333337`, 0.33333333333333337`],
+FrontFaceColor->RGBColor[0.33333333333333337`, 0.33333333333333337`, 0.33333333333333337`],
+BackFaceColor->RGBColor[0.33333333333333337`, 0.33333333333333337`, 0.33333333333333337`],
+GraphicsColor->RGBColor[0.33333333333333337`, 0.33333333333333337`, 0.33333333333333337`],
+FontFamily->"Helvetica",
+FontWeight->Bold,
+FontColor->RGBColor[0.33333333333333337`, 0.33333333333333337`, 0.33333333333333337`]]\)},maTitleFormatOptions];
+	(maReportFrame[title,grid])
+]
+gridTOTAL[s]
+
+
+SetDirectory@FileNameJoin@{mrtFileDirectory[],"reports"};
+
+
+$fileName1="Pend\[EHat]ncias em "<>$now2<>".png";
+Export["Pend\[EHat]ncias em "<>$now2<>".png",gridTOTAL[s]];
+
+
+$fileName="EXCLUSIVO ESM-VENDA HORTUS PARA ALIMENTUM EM "<>$now2<>".xlsx";
+Export["EXCLUSIVO ESM-VENDA HORTUS PARA ALIMENTUM EM "<>$now2<>".xlsx",r["DataAll"]];		
+
+
+marcheMail[
+  		"[GE] Pend\[EHat]ncias de emiss\[ATilde]o de NF HORTUS PARA ALIMENTUM EM " <>$now 
+  		,"USAR CODIGO DA NOTA 43"
+		  ,$mailsGerencia 
+		  ,{$fileName1,$fileName}
+]
